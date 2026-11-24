@@ -1,0 +1,53 @@
+name: clipmunk-monitor
+
+# Keeps exactly one bot account active. Runs on a PUBLIC repo, so its
+# Actions minutes are free and continue after the private bot repo's
+# included minutes are exhausted. No secrets live in this file: the account
+# tokens and config are repo secrets, written to the runner temp dir only.
+
+on:
+  schedule:
+    - cron: "17 * * * *"   # hourly, offset from the bot's :09/:39 runs
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: clipmunk-monitor
+  cancel-in-progress: false
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Install monitor dependency
+        run: pip install --quiet pynacl
+
+      - name: Restore secrets to the runner
+        env:
+          ACCOUNTS_JSON: ${{ secrets.ACCOUNTS_JSON }}
+          CONFIG_ENV_B64: ${{ secrets.CONFIG_ENV_B64 }}
+        run: |
+          umask 077
+          if [ -z "$ACCOUNTS_JSON" ] || [ -z "$CONFIG_ENV_B64" ]; then
+            echo "::error::ACCOUNTS_JSON and CONFIG_ENV_B64 must be set"
+            exit 1
+          fi
+          printf '%s' "$ACCOUNTS_JSON" > "$RUNNER_TEMP/accounts.json"
+          printf '%s' "$CONFIG_ENV_B64" | base64 -d > "$RUNNER_TEMP/config.env"
+
+      - name: Check accounts and switch if exhausted
+        env:
+          CLIPMUNK_CLOUD: "1"
+          CLIPMUNK_ACCOUNTS: ${{ runner.temp }}/accounts.json
+          CLIPMUNK_CONFIG: ${{ runner.temp }}/config.env
+          CLIPMUNK_REPO: /nonexistent
+        run: python monitor/switch_account.py --auto
