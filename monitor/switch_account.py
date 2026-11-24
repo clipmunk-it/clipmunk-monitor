@@ -30,8 +30,10 @@ import urllib.parse
 import urllib.request
 from datetime import datetime, timezone
 
-ACCOUNTS = os.path.expanduser("~/.clipmunk/accounts.json")
-DEFAULT_CONFIG = "/Users/mac/Downloads/clipmunk/config.env"
+ACCOUNTS = (os.environ.get("CLIPMUNK_ACCOUNTS")
+            or os.path.expanduser("~/.clipmunk/accounts.json"))
+DEFAULT_CONFIG = (os.environ.get("CLIPMUNK_CONFIG")
+                  or "/Users/mac/Downloads/clipmunk/config.env")
 LOCAL_REPO = os.environ.get("CLIPMUNK_REPO", "/Users/mac/Downloads/clipmunk")
 API = "https://api.github.com"
 
