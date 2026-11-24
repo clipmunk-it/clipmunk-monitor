@@ -42,6 +42,7 @@ INFRA_FAILURE_SECONDS = 20    # a blocked job dies in ~3s, no steps
 MAX_SWITCH_PER_HOUR = 1
 MONTHLY_INCLUDED_MINUTES = 2000
 CLOUD = bool(os.environ.get("CLIPMUNK_CLOUD"))
+STATE = os.environ.get("CLIPMUNK_STATE")  # optional JSON for cloud persistence
 
 
 # --------------------------------------------------------------------------- #
@@ -49,7 +50,22 @@ CLOUD = bool(os.environ.get("CLIPMUNK_CLOUD"))
 # --------------------------------------------------------------------------- #
 def load_accounts():
     with open(ACCOUNTS, encoding="utf-8") as fh:
-        return json.load(fh)
+        data = json.load(fh)
+    if STATE and os.path.exists(STATE):
+        try:
+            with open(STATE, encoding="utf-8") as fh:
+                st = json.load(fh)
+            for key in ("active", "last_switch_at", "last_switch_reason",
+                        "last_no_standby_alert", "last_switch_fail_alert"):
+                if key in st:
+                    data[key] = st[key]
+            last = st.get("last_active") or {}
+            for a in data.get("accounts", []):
+                if a.get("name") in last:
+                    a["last_active"] = last[a["name"]]
+        except Exception:  # noqa: BLE001 - bad state must not stop a monitor
+            pass
+    return data
 
 
 def save_accounts(data):
@@ -58,6 +74,18 @@ def save_accounts(data):
     with os.fdopen(fd, "w", encoding="utf-8") as fh:
         json.dump(data, fh, indent=1)
     os.replace(tmp, ACCOUNTS)
+    if STATE:
+        st = {k: data.get(k) for k in
+              ("active", "last_switch_at", "last_switch_reason",
+               "last_no_standby_alert", "last_switch_fail_alert")
+              if data.get(k) is not None}
+        st["last_active"] = {a["name"]: a.get("last_active")
+                             for a in data.get("accounts", [])
+                             if a.get("last_active")}
+        tmp = STATE + ".tmp"
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(st, fh, indent=1)
+        os.replace(tmp, STATE)
 
 
 def find(data, name):
@@ -439,12 +467,10 @@ def auto_mode(data, config_path):
     candidates = [a for a in data.get("accounts", [])
                   if a.get("name") != active["name"]]
     if not candidates:
-        if CLOUD:
-            print("no standby accounts configured")
-        else:
-            alert_once(data, "last_no_standby_alert",
-                       "⚠️ clipmunk: {} looks exhausted ({}) and there is no "
-                       "standby account configured.".format(active["name"], h))
+        alert_once(data, "last_no_standby_alert",
+                   "⚠️ clipmunk: {} looks exhausted ({}) and there is no "
+                   "standby account configured.".format(active["name"], h))
+        print("no standby accounts configured")
         return 1
     for a in candidates:
         if not a.get("user"):
